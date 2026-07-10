@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
+import ArchitecturePage from "./ArchitecturePage";
+import EditorialToc from "./EditorialToc";
 
 type Stage = { label: string; shape: string; detail: string };
 
@@ -304,14 +306,15 @@ function CopyCommand({ command }: { command: string }) {
 }
 
 export default function App() {
+  if (window.location.pathname === "/architecture") return <ArchitecturePage />;
   return (
-    <main>
+    <main className="page-with-editorial-toc">
       <header className="topbar">
         <a className="brand" href="#top"><span>vat</span>-mini <i>technical notes</i></a>
-        <nav aria-label="Page sections"><a href="#model">Model</a><a href="#training">Training</a><a href="#tracking">Tracking</a><a href="#code">Code</a><a href="#run">Run</a></nav>
+        <nav aria-label="Page sections"><a href="/architecture">Learn architecture</a><a href="#model">Model</a><a href="#training">Training</a><a href="#tracking">Tracking</a><a href="#code">Code</a><a href="#run">Run</a></nav>
         <span className="status"><i /> LOCAL / MPS</span>
       </header>
-      <StickyToc />
+      <EditorialToc items={tocItems.map(item => ({ id: item.id, title: item.title }))} accent="#7b2e2b" />
 
       <section className="hero" id="top">
         <div className="hero-grid" aria-hidden="true" />
@@ -327,25 +330,6 @@ export default function App() {
           <div className="action-vector"><span>ACTION / t=08</span><code>RIGHT · p=0.81</code></div>
         </div>
         <div className="hero-foot"><span>01 / OBSERVE</span><span>02 / REPRESENT</span><span>03 / PREDICT</span><span>04 / ACT</span></div>
-      </section>
-
-      <section className="contents" id="contents">
-        <SectionLabel index="00">TABLE OF CONTENTS</SectionLabel>
-        <div className="contents-layout">
-          <div>
-            <h2>What this guide covers</h2>
-            <p>Read in order for a complete walkthrough, or use the links to open a specific lesson.</p>
-          </div>
-          <ol>
-            <li><a href="#model"><span>01</span><strong>System overview</strong><small>What the model receives, learns, and predicts</small></a></li>
-            <li><a href="#architecture"><span>02</span><strong>Architecture and shapes</strong><small>How an image becomes an action prediction</small></a></li>
-            <li><a href="#causal"><span>03</span><strong>Causal attention</strong><small>Why the model cannot inspect future steps</small></a></li>
-            <li><a href="#training"><span>04</span><strong>Training procedure</strong><small>Loss, gradients, updates, and training stages</small></a></li>
-            <li><a href="#tracking"><span>05</span><strong>Experiment tracking</strong><small>What to measure while the model learns</small></a></li>
-            <li><a href="#code"><span>06</span><strong>Codebase map</strong><small>Where each responsibility lives</small></a></li>
-            <li><a href="#run"><span>07</span><strong>Local workflow</strong><small>Commands from setup through evaluation</small></a></li>
-          </ol>
-        </div>
       </section>
 
       <section className="intro" id="model">
