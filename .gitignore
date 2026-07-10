@@ -1,0 +1,19 @@
+.DS_Store
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Local training artifacts
+artifacts/
+runs/
+checkpoints/
+data/generated/
+
+# Learning site
+learning-site/node_modules/
+learning-site/dist/

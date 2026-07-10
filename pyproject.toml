@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vat-mini"
+version = "0.1.0"
+description = "A small vision-action transformer learning sandbox"
+requires-python = ">=3.11,<3.13"
+dependencies = [
+  "numpy>=1.26",
+  "PyYAML>=6.0",
+  "torch>=2.2",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+tracking = ["Pillow>=10", "wandb>=0.18"]
+
+[project.scripts]
+vat-mini = "vat_mini.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
