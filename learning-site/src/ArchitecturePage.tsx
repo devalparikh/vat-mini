@@ -107,7 +107,7 @@ const architectureStages = [
 
 const lessonIndex = [
   ["pipeline", "01", "Pipeline", "The full observation-to-action path"],
-  ["vectors", "02", "Representation", "How pixels become learned features"],
+  ["vectors", "02", "Vision embedding", "How images get converted to vectors"],
   ["token", "03", "Timestep token", "How one moment is represented"],
   ["attention", "04", "Context", "How earlier timesteps communicate"],
   ["prediction", "05", "Prediction", "How context becomes an action"],
@@ -172,15 +172,147 @@ function TokenMath() {
 }
 
 function AttentionLab() {
-  const [query, setQuery] = useState(3);
+  const [query, setQuery] = useState(2);
+  const frames = [
+    { image: "/forward-pass/pov-beacon-right.png", action: "UP", note: "beacon right" },
+    { image: "/forward-pass/pov-beacon-up.png", action: "RIGHT", note: "turn completed" },
+    { image: "/forward-pass/pov-beacon-centered.png", action: "UP", note: "dock centered" },
+    { image: null, action: "?", note: "not observed yet" },
+    { image: null, action: "?", note: "not observed yet" },
+  ] as const;
+  const weights = [
+    [1, 0, 0, 0, 0],
+    [.38, .62, 0, 0, 0],
+    [.18, .29, .53, 0, 0],
+    [.12, .18, .27, .43, 0],
+    [.08, .13, .19, .25, .35],
+  ][query];
+  const strongest = weights.indexOf(Math.max(...weights));
+
   return <div className="attention-lab">
-    <div className="timeline-tokens">
-      {Array.from({ length: 6 }, (_, index) => <button key={index} className={index === query ? "query" : index <= query ? "available" : "future"} onClick={() => setQuery(index)}><span>t{index}</span><small>{index === query ? "predict" : index < query ? "history" : "hidden"}</small></button>)}
+    <div className="attention-intro"><span>RECORDED TRAJECTORY / RUN 042</span><p>Select the moment making a prediction. Its query can gather evidence only from frames already observed.</p></div>
+    <div className="attention-workbench">
+      <div className="history-filmstrip">
+        {frames.map((frame, index) => <button key={index} className={index === query ? "query" : index < query ? "available" : "future"} onClick={() => setQuery(index)}>
+          <div className="history-image">{frame.image && index <= query ? <img src={frame.image} alt={`Robot camera observation at timestep ${index}`} /> : <span>{index > query ? "FUTURE BLOCKED" : "FRAME UNAVAILABLE"}</span>}<i>t{index}</i></div>
+          <b>{index === query ? "current query" : index < query ? frame.note : "cannot inspect"}</b>
+          <small>previous action / {index <= query ? frame.action : "hidden"}</small>
+        </button>)}
+      </div>
+
+      <div className="attention-detail">
+        <div className="weight-panel">
+          <div className="detail-label"><span>ATTENTION FROM t{query}</span><small>weights sum to 1.00</small></div>
+          <div className="weight-bars">{frames.map((_, index) => <div key={index} className={index > query ? "blocked" : index === strongest ? "strongest" : ""}><span>t{index}</span><i><b style={{ width: `${weights[index] * 100}%` }} /></i><strong>{index > query ? "MASK" : weights[index].toFixed(2)}</strong></div>)}</div>
+          <p>For this illustrative head, <strong>t{strongest}</strong> contributes the most. The transformer combines all allowed value vectors in these proportions.</p>
+        </div>
+        <div className="mask-panel">
+          <div className="detail-label"><span>CAUSAL MASK</span><small>rows query · columns source</small></div>
+          <div className="mask-grid" aria-label="Causal attention mask">
+            <i />{frames.map((_, index) => <b key={`column-${index}`}>t{index}</b>)}
+            {frames.flatMap((_, row) => [<b key={`row-${row}`}>t{row}</b>, ...frames.map((__, column) => <i key={`${row}-${column}`} className={column <= row ? row === query && column === strongest ? "focus" : "open" : "locked"}>{column <= row ? "●" : "×"}</i>)])}
+          </div>
+          <p>The lower triangle is readable. Every × above it blocks a future token—even while the full training sequence is in memory.</p>
+        </div>
+      </div>
     </div>
-    <div className="attention-rays" aria-hidden="true">
-      {Array.from({ length: 6 }, (_, index) => <i key={index} className={index <= query ? "on" : "off"} style={{ "--i": index, "--q": query } as React.CSSProperties} />)}
+    <div className="attention-readout"><span>QUERY t{query}</span><strong>Reads {query + 1} of {frames.length} tokens</strong><p>Future positions are blocked by the <Term id="causal">causal mask</Term>, so training matches what is available during a live rollout.</p></div>
+  </div>;
+}
+
+const actionNames = ["stay", "up", "down", "left", "right"] as const;
+
+const forwardPassExamples = [
+  {
+    id: "turn-right",
+    label: "Beacon right",
+    title: "The target enters on the right.",
+    image: "/forward-pass/pov-beacon-right.png",
+    frame: "run_042 / frame 0184",
+    previousAction: "UP",
+    visual: [0.82, -0.18, 0.44, 1.08],
+    token: [0.91, 0.12, 0.31, 1.26],
+    context: [1.18, -0.09, 0.72, 1.48],
+    logits: [-1.1, -0.4, -0.8, -1.3, 2.1],
+    explanation: "The right-side beacon changes the visual features. After history is mixed in, RIGHT receives the largest raw score.",
+  },
+  {
+    id: "move-up",
+    label: "Beacon above",
+    title: "The robot turns; the target moves up.",
+    image: "/forward-pass/pov-beacon-up.png",
+    frame: "run_042 / frame 0185",
+    previousAction: "RIGHT",
+    visual: [-0.32, 0.98, 0.71, -0.12],
+    token: [-0.08, 1.21, 0.54, 0.18],
+    context: [-0.11, 1.42, 0.88, 0.22],
+    logits: [-0.9, 2.0, -1.2, -0.5, -0.7],
+    explanation: "The next recorded frame and previous RIGHT action produce a different context vector. Now UP ranks first.",
+  },
+  {
+    id: "hold-position",
+    label: "Dock aligned",
+    title: "The beacon is centered and close.",
+    image: "/forward-pass/pov-beacon-centered.png",
+    frame: "run_042 / frame 0186",
+    previousAction: "UP",
+    visual: [0.52, 0.48, -0.22, 1.31],
+    token: [0.67, 0.61, -0.08, 1.46],
+    context: [0.81, 0.58, 0.03, 1.52],
+    logits: [2.3, -1.0, -0.9, -1.1, -0.8],
+    explanation: "A centered, close beacon creates another activation pattern. STAY now wins, so the robot holds its position.",
+  },
+] as const;
+
+function softmax(values: readonly number[]) {
+  const peak = Math.max(...values);
+  const exponentials = values.map(value => Math.exp(value - peak));
+  const total = exponentials.reduce((sum, value) => sum + value, 0);
+  return exponentials.map(value => value / total);
+}
+
+function ShortVector({ values }: { values: readonly number[] }) {
+  return <code>[{values.map(value => value.toFixed(2)).join(", ")}, …]</code>;
+}
+
+function ForwardPassLab() {
+  const [selected, setSelected] = useState(0);
+  const example = forwardPassExamples[selected];
+  const probabilities = softmax(example.logits);
+  const winner = probabilities.indexOf(Math.max(...probabilities));
+
+  return <div className="forward-lab">
+    <div className="pass-selector" aria-label="Choose a recorded forward-pass example">
+      {forwardPassExamples.map((item, index) => <button key={item.id} className={index === selected ? "active" : ""} onClick={() => setSelected(index)}><span>0{index + 1}</span><b>{item.label}</b><small>{index === 0 ? "RIGHT" : index === 1 ? "UP" : "STAY"} wins</small></button>)}
     </div>
-    <div className="attention-readout"><span>QUERY t{query}</span><strong>May read {query + 1} token{query ? "s" : ""}</strong><p>Future positions are blocked by the <Term id="causal">causal mask</Term>.</p></div>
+
+    <div className="recording-strip">
+      <div><span>HYPOTHETICAL POV TRAINING CLIP</span><p>Three consecutive RGB observations from one robot-mounted camera recording.</p></div>
+      <div className="recording-frames">
+        {forwardPassExamples.map((item, index) => <button key={item.id} className={index === selected ? "active" : ""} onClick={() => setSelected(index)}><img src={item.image} alt={`Robot camera sample: ${item.label.toLowerCase()}`} /><span>t{index}</span><small>{item.previousAction}</small></button>)}
+      </div>
+    </div>
+
+    <div className="pass-heading"><span>FORWARD PASS 0{selected + 1}</span><h3>{example.title}</h3><p>{example.explanation}</p></div>
+
+    <div className="forward-stages">
+      <article className="stage-observation"><span>01 / RGB FRAME</span><img src={example.image} alt={`Selected POV observation: ${example.label.toLowerCase()}`} /><code>{example.frame}</code><small>raw camera tensor [3, 32, 32]</small></article>
+      <i aria-hidden="true">→</i>
+      <article><span>02 / CNN</span><div className="feature-map">{Array.from({ length: 16 }, (_, index) => <i key={index} style={{ "--a": ((Math.abs(example.visual[index % 4]) + index * .07) % 1).toFixed(2) } as React.CSSProperties} />)}</div><ShortVector values={example.visual} /><small>spatial maps → visual vector [96]</small></article>
+      <i aria-hidden="true">→</i>
+      <article><span>03 / TOKEN</span><div className="token-operands"><b>vision</b><b>+ prev {example.previousAction}</b><b>+ position t{selected}</b></div><ShortVector values={example.token} /><small>three 96-D vectors add together</small></article>
+      <i aria-hidden="true">→</i>
+      <article><span>04 / CONTEXT</span><div className="context-rings"><i /><i /><i /></div><ShortVector values={example.context} /><small>causal transformer mixes t0 … t{selected}</small></article>
+      <i aria-hidden="true">→</i>
+      <article className="stage-logits"><span>05 / LOGITS</span><div>{example.logits.map((value, index) => <b key={actionNames[index]} className={index === winner ? "winner" : ""}><small>{actionNames[index]}</small>{value.toFixed(1)}</b>)}</div><small>linear head [96 → 5], raw scores</small></article>
+    </div>
+
+    <div className="softmax-readout">
+      <div className="softmax-rule"><span>06 / SOFTMAX</span><code>exp(logitᵢ) / Σ exp(logit)</code><small>normalizes scores to 100%</small></div>
+      <div className="probability-visual">{probabilities.map((value, index) => <div key={actionNames[index]} className={index === winner ? "winner" : ""}><span>{actionNames[index]}</span><i style={{ width: `${value * 100}%` }} /><b>{Math.round(value * 100)}%</b></div>)}</div>
+      <p className="selection-note">Argmax selects <strong>{actionNames[winner]}</strong>. Same weights, different pixels and history → different vectors → different logits.</p>
+    </div>
+    <p className="dataset-caveat"><strong>What is real here?</strong> The images are a generated example of what robot-mounted training footage can look like; the vectors and logits are illustrative. VaT-mini’s included dataset uses rendered GridWorld frames, but the tensor path is the same.</p>
   </div>;
 }
 
@@ -194,6 +326,33 @@ function TrainingFlow() {
     { label: "Backprop", title: "Credit flows through the whole graph.", detail: "Gradients trace the error backward: action head → transformer → vision encoder." },
     { label: "Update", title: "Useful visual features become stronger.", detail: "The optimizer nudges every weight. On the next pass, the encoder represents this scene in a way that makes RIGHT easier to predict." },
   ];
+  const exampleValues = [
+    [
+      ["IMAGE BATCH", "images.shape", "[3, 4, 3, 32, 32]", "3 trajectories × 4 timesteps × RGB image"],
+      ["SAMPLE 0 / t3", "pixel excerpt", "[0.00, 0.18, 1.00, 0.00, …]", "normalized channel values"],
+      ["ENCODER OUTPUT", "embedding[0,3]", "[0.80, −0.20, 0.40, 1.10, …]", "4 shown of 96 learned features"],
+    ],
+    [
+      ["ACTION LOGITS", "logits[0,3]", "[0.00, −0.40, −0.30, −0.70, 0.00]", "stay, up, down, left, right"],
+      ["SOFTMAX", "probabilities", "[0.26, 0.17, 0.19, 0.13, 0.26]", "RIGHT receives only 26%"],
+      ["EXPERT TARGET", "actions[0,3]", "4 → RIGHT", "the correct class index"],
+    ],
+    [
+      ["SAMPLE LOSS", "−log p(RIGHT)", "−log(0.26) = 1.35", "low expert probability means high loss"],
+      ["BATCH LOSSES", "loss per sample", "[1.35, 0.51, 0.83]", "one example from each trajectory"],
+      ["MEAN LOSS", "loss.mean()", "0.90", "the scalar sent into backprop"],
+    ],
+    [
+      ["OUTPUT GRADIENT", "∂L/∂logit_RIGHT", "0.26 − 1.00 = −0.74", "sample 0 needs a higher RIGHT score"],
+      ["ENCODER GRAD", "∂L/∂embedding", "[−0.03, 0.08, −0.01, −0.05, …]", "credit reaches the visual features"],
+      ["GRADIENT SIZE", "encoder grad norm", "0.42", "one summary of all encoder gradients"],
+    ],
+    [
+      ["ONE WEIGHT", "before", "w = 0.180", "an illustrative encoder connection"],
+      ["SGD UPDATE", "w − lr × grad", "0.180 − 0.10 × (−0.06)", "negative gradient increases this weight"],
+      ["NEXT PASS", "after", "w = 0.186 · p(RIGHT) = 0.61", "the full model now favors RIGHT"],
+    ],
+  ] as const;
   useEffect(() => {
     if (!playing) return;
     const timer = window.setInterval(() => setActive(value => (value + 1) % stages.length), 1400);
@@ -216,6 +375,10 @@ function TrainingFlow() {
         <svg className="gradient-wire" viewBox="0 0 1000 90" preserveAspectRatio="none" aria-hidden="true"><path d="M930 12 C790 78 620 78 500 45 S220 12 120 72" /></svg>
       </div>
       <div className="nn-explanation" aria-live="polite"><span>STEP 0{active + 1}</span><h3>{stages[active].title}</h3><p>{stages[active].detail}</p></div>
+      <div className="training-values" aria-label={`Example values for ${stages[active].label}`}>
+        <div className="values-heading"><span>TOY BATCH / REAL TENSOR SHAPES</span><p>Follow highlighted sample <code>batch 0, timestep 3</code>.</p></div>
+        {exampleValues[active].map(([label, name, value, note]) => <div className="value-row" key={label}><span>{label}</span><code>{name}</code><strong>{value}</strong><small>{note}</small></div>)}
+      </div>
     </div>
     <p className="training-takeaway"><strong>No object label is required.</strong> The only target is the expert action. If noticing the blue agent and red goal helps predict that action, backpropagation rewards encoder features that notice them.</p>
   </div>;
@@ -231,19 +394,19 @@ export default function ArchitecturePage() {
       <div className="hero-loop" aria-label="Animated vision action loop"><div className="loop-camera"><i /><i /></div><div className="loop-vector">[0.8, −0.2, 0.4, 1.1]</div><div className="loop-action">RIGHT <b>81%</b></div><svg viewBox="0 0 560 330"><path d="M75 170 C120 35 420 30 490 155 C555 275 225 330 75 170"/><circle r="7"><animateMotion dur="5s" repeatCount="indefinite" path="M75 170 C120 35 420 30 490 155 C555 275 225 330 75 170"/></circle></svg></div>
     </section>
 
-    <section className="learn-section stage-section" id="pipeline"><div className="learn-heading"><span>01 / PIPELINE</span><h2>The architecture at a glance.</h2><p>Follow the prediction path once. Hover a highlighted term for a quick definition; click it for the full explanation.</p></div><div className="architecture-stages">{architectureStages.map(([number, title, detail, concept]) => <article key={number}><span>{number}</span><div><h3><Term id={concept}>{title}</Term></h3><p>{detail}</p></div><i>→</i></article>)}</div><div className="loop-summary">observe → encode → build token → use context → score actions → act → observe again</div></section>
+    <section className="learn-section stage-section" id="pipeline"><div className="learn-heading"><span>01 / PIPELINE</span><h2>How an image becomes an action.</h2><p>This is the full process from the current image to the model's selected action. Each step is explained in the sections below.</p></div><div className="architecture-stages">{architectureStages.map(([number, title, detail, concept]) => <article key={number}><span>{number}</span><div><h3><Term id={concept}>{title}</Term></h3><p>{detail}</p></div><i>→</i></article>)}</div><div className="loop-summary">observe → encode → build token → use context → score actions → act → observe again</div></section>
 
-    <section className="learn-section encoder-section" id="vectors"><div className="learn-heading"><span>02 / REPRESENTATION</span><h2>Pixels become a vector.</h2><p>The <Term id="encoder">vision encoder</Term> converts a large image tensor into one compact <Term id="embedding">embedding</Term>.</p></div><PixelEncoderLab/><div className="explain-pair"><article><span>STRUCTURE</span><h3><code>[3, 32, 32]</code> is not 3 numbers.</h3><p>It means three color grids, each 32 pixels high and 32 pixels wide. That is 3,072 input values.</p></article><article><span>MEANING</span><h3><code>[0.8, −0.2, 0.4, 1.1]</code> is one toy embedding.</h3><p>The four values work together as learned features. Real embeddings may contain 96, 512, or more values.</p></article></div></section>
+    <section className="learn-section encoder-section" id="vectors"><div className="learn-heading"><span>02 / VISION EMBEDDING</span><h2>Images get converted to vectors.</h2><p>This is only the first part of the process. The next section shows how the visual vector is combined with action and position information.</p></div><PixelEncoderLab/><div className="explain-pair"><article><span>STRUCTURE</span><h3><code>[3, 32, 32]</code> is not 3 numbers.</h3><p>It means three color grids, each 32 pixels high and 32 pixels wide. That is 3,072 input values.</p></article><article><span>MEANING</span><h3><code>[0.8, −0.2, 0.4, 1.1]</code> is one toy embedding.</h3><p>The four values work together as learned features. Real embeddings may contain 96, 512, or more values.</p></article></div></section>
 
-    <section className="learn-section token-section" id="token"><div className="learn-heading"><span>03 / TOKEN</span><h2>One moment needs more than vision.</h2><p>The model combines what it sees, what it just did, and where it is in the sequence into one <Term id="token">timestep token</Term>.</p></div><TokenMath/></section>
+    <section className="learn-section token-section" id="token"><div className="learn-heading"><span>03 / TIMESTEP TOKEN</span><h2>Visual, action, and position vectors are combined.</h2><p>The result is one <Term id="token">timestep token</Term> that represents the current moment.</p></div><TokenMath/></section>
 
-    <section className="learn-section attention-section" id="attention"><div className="learn-heading"><span>04 / CONTEXT</span><h2>Attention connects the timeline.</h2><p>Select a timestep. <Term id="attention">Attention</Term> can use that token and earlier tokens; the future stays hidden.</p></div><AttentionLab/><div className="qkv-strip"><div><b>Query</b><span>What information do I need?</span></div><div><b>Key</b><span>What kind of information do I contain?</span></div><div><b>Value</b><span>What information should I send?</span></div></div></section>
+    <section className="learn-section attention-section" id="attention"><div className="learn-heading"><span>04 / ATTENTION</span><h2>Each timestep uses current and earlier information.</h2><p><Term id="attention">Attention</Term> connects the selected timestep to relevant earlier timesteps. It cannot use future information.</p></div><AttentionLab/><div className="qkv-strip"><div><b>Query</b><span>What information do I need?</span></div><div><b>Key</b><span>What kind of information do I contain?</span></div><div><b>Value</b><span>What information should I send?</span></div></div></section>
 
-    <section className="learn-section prediction-section" id="prediction"><div className="learn-heading"><span>05 / PREDICTION</span><h2>Context becomes action scores.</h2><p>The action head converts the newest contextual token into <Term id="logits">logits</Term>, then softmax converts them into probabilities.</p></div><div className="probability-visual">{[["stay", 5], ["up", 7], ["down", 4], ["left", 3], ["right", 81]].map(([name, value]) => <div key={name}><span>{name}</span><i style={{ width: `${value}%` }}/><b>{value}%</b></div>)}</div><p className="selection-note">The <Term id="policy">policy</Term> selects <strong>right</strong>, the highest-probability action.</p></section>
+    <section className="learn-section prediction-section" id="prediction"><div className="learn-heading"><span>05 / ACTION PREDICTION</span><h2>The model calculates a score for each action.</h2><p>Those scores become action probabilities. The image and action history change the result even though the model weights stay the same.</p></div><ForwardPassLab /></section>
 
-    <section className="learn-section learning-section" id="training"><div className="learn-heading"><span>06 / LEARNING</span><h2>The vision encoder learns from action mistakes.</h2><p>There is no separate “find the agent” label. One action <Term id="loss">loss</Term> trains the full model end to end.</p></div><TrainingFlow/><div className="training-contrast"><article><span>TRAINING</span><h3><Term id="teacher">Teacher forcing</Term></h3><p>The model receives the expert's previous actions. This creates clean histories and efficient parallel training.</p></article><article><span>DEPLOYMENT</span><h3><Term id="rollout">Rollout</Term></h3><p>The model receives its own previous actions. One mistake can change the next observation and make recovery harder.</p></article></div></section>
+    <section className="learn-section learning-section" id="training"><div className="learn-heading"><span>06 / TRAINING</span><h2>Action errors update the entire model.</h2><p>One action <Term id="loss">loss</Term> trains the vision encoder, transformer, and action head together. No separate object labels are required.</p></div><TrainingFlow/><div className="training-contrast"><article><span>TRAINING</span><h3><Term id="teacher">Teacher forcing</Term></h3><p>The model receives the expert's previous actions. This creates clean histories and efficient parallel training.</p></article><article><span>DEPLOYMENT</span><h3><Term id="rollout">Rollout</Term></h3><p>The model receives its own previous actions. One mistake can change the next observation and make recovery harder.</p></article></div></section>
 
-    <section className="learn-section final-model"><span>THE MODEL IN ONE LINE</span><h2>See the world. Compress it. Connect it to history. Choose what happens next.</h2><code>P(action_t | image_0 … image_t, action_0 … action_(t−1))</code><div><a href="#pipeline">Review the pipeline ↑</a><a href="/">Open the VaT-mini code guide →</a></div></section>
+    <section className="learn-section final-model"><span>THE MODEL IN ONE LINE</span><h2>The model predicts the next action from the current image and earlier actions.</h2><code>P(action_t | image_0 … image_t, action_0 … action_(t−1))</code><div><a href="#pipeline">Review the pipeline ↑</a><a href="/">Open the VaT-mini code guide →</a></div></section>
     <footer className="learn-footer"><a href="/" className="learn-brand"><b>vat</b>-mini</a><p>Vision-action transformer architecture.</p></footer>
   </main>;
 }
