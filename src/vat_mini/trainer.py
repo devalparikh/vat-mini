@@ -10,7 +10,12 @@ import torch
 
 from vat_mini.checkpoint import CheckpointManager, load_checkpoint
 from vat_mini.config import ExperimentConfig
-from vat_mini.evaluation import evaluate_demonstrations, evaluate_rollouts, record_rollout
+from vat_mini.evaluation import (
+    evaluate_demonstrations,
+    evaluate_rollouts,
+    record_demonstration,
+    record_rollout,
+)
 from vat_mini.model import VisionActionTransformer
 from vat_mini.objectives import (
     AdvantageWeightedImitationObjective,
@@ -79,20 +84,29 @@ class Trainer:
                     {"epoch": epoch, **self._namespaced_epoch_metrics(metrics)}, self.global_step
                 )
                 if (
-                    self.config.data.dataset_type == "gridworld"
-                    and self.config.model.action_type == "discrete"
-                    and
                     self.tracker.enabled
                     and epoch % self.config.tracking.rollout_every_epochs == 0
                 ):
-                    trace = record_rollout(
-                        self.model,
-                        self.device,
-                        self.config.data.grid_size,
-                        self.config.data.image_size,
-                        seed=self.config.seed + 2,
-                    )
-                    self.tracker.log_rollout(trace, epoch, self.global_step)
+                    if (
+                        self.config.data.dataset_type == "gridworld"
+                        and self.config.model.action_type == "discrete"
+                    ):
+                        trace = record_rollout(
+                            self.model,
+                            self.device,
+                            self.config.data.grid_size,
+                            self.config.data.image_size,
+                            seed=self.config.seed + 2,
+                        )
+                        self.tracker.log_rollout(trace, epoch, self.global_step)
+                    else:
+                        demonstration = record_demonstration(
+                            self.model, validation_loader, self.device
+                        )
+                        if demonstration is not None:
+                            self.tracker.log_demonstration(
+                                demonstration, epoch, self.global_step
+                            )
                 if epoch % self.config.training.checkpoint_every_epochs == 0:
                     self.checkpoints.save(
                         self.model, self.optimizer, self.config, epoch, self.global_step, metrics

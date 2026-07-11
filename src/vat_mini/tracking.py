@@ -9,7 +9,7 @@ import numpy as np
 
 from vat_mini.config import ExperimentConfig
 from vat_mini.data import ACTION_NAMES
-from vat_mini.evaluation import RolloutTrace
+from vat_mini.evaluation import DemonstrationTrace, RolloutTrace
 
 
 class ExperimentTracker(Protocol):
@@ -19,6 +19,8 @@ class ExperimentTracker(Protocol):
     def log_metrics(self, metrics: dict[str, float | int], step: int) -> None: ...
 
     def log_rollout(self, trace: RolloutTrace, epoch: int, step: int) -> None: ...
+
+    def log_demonstration(self, trace: DemonstrationTrace, epoch: int, step: int) -> None: ...
 
     def log_checkpoint(self, path: str | Path, stage: str) -> None: ...
 
@@ -34,6 +36,9 @@ class DisabledTracker:
         del metrics, step
 
     def log_rollout(self, trace: RolloutTrace, epoch: int, step: int) -> None:
+        del trace, epoch, step
+
+    def log_demonstration(self, trace: DemonstrationTrace, epoch: int, step: int) -> None:
         del trace, epoch, step
 
     def log_checkpoint(self, path: str | Path, stage: str) -> None:
@@ -77,12 +82,25 @@ class WandbTracker:
     def log_metrics(self, metrics: dict[str, float | int], step: int) -> None:
         self._run.log({"trainer/global_step": step, **metrics})
 
+    def _write_gif(self, frames: np.ndarray, name: str) -> Path:
+        """Write channel-first float frames in [0, 1] to an upscaled looping gif."""
+        pixels = np.clip(frames * 255.0, 0, 255).astype(np.uint8).transpose(0, 2, 3, 1)
+        # Make the small frame legible without changing its pixels.
+        scale = max(1, 256 // max(pixels.shape[1:3]))
+        pixels = np.repeat(np.repeat(pixels, scale, axis=1), scale, axis=2)
+        gif_path = self._media_dir / name
+        images = [self._image.fromarray(frame, mode="RGB") for frame in pixels]
+        images[0].save(
+            gif_path,
+            save_all=True,
+            append_images=images[1:],
+            duration=500,
+            loop=0,
+            optimize=False,
+        )
+        return gif_path
+
     def log_rollout(self, trace: RolloutTrace, epoch: int, step: int) -> None:
-        frames = np.clip(trace.frames * 255.0, 0, 255).astype(np.uint8)
-        frames = frames.transpose(0, 2, 3, 1)
-        # Make the small environment legible without changing its pixels.
-        scale = max(1, 256 // max(frames.shape[1:3]))
-        frames = np.repeat(np.repeat(frames, scale, axis=1), scale, axis=2)
         actions = ", ".join(ACTION_NAMES[action] for action in trace.actions)
         caption = (
             f"epoch {epoch} | {'success' if trace.success else 'timeout'} | "
@@ -95,16 +113,29 @@ class WandbTracker:
                 for index, (action, reward) in enumerate(zip(trace.actions, trace.rewards))
             ],
         )
-        gif_path = self._media_dir / f"rollout-epoch-{epoch:03d}.gif"
-        images = [self._image.fromarray(frame, mode="RGB") for frame in frames]
-        images[0].save(
-            gif_path,
-            save_all=True,
-            append_images=images[1:],
-            duration=500,
-            loop=0,
-            optimize=False,
+        gif_path = self._write_gif(trace.frames, f"rollout-epoch-{epoch:03d}.gif")
+        self._run.log(
+            {
+                "trainer/global_step": step,
+                "rollout/video": self._wandb.Video(str(gif_path), format="gif", caption=caption),
+                "rollout/actions": table,
+            }
         )
+
+    def log_demonstration(self, trace: DemonstrationTrace, epoch: int, step: int) -> None:
+        action_dimension = trace.ground_truth_actions.shape[-1]
+        table = self._wandb.Table(
+            columns=["epoch", "step", "dimension", "predicted", "ground_truth"],
+            data=[
+                [epoch, frame_index + 1, dimension, float(predicted[dimension]), float(truth[dimension])]
+                for frame_index, (predicted, truth) in enumerate(
+                    zip(trace.predicted_actions, trace.ground_truth_actions)
+                )
+                for dimension in range(action_dimension)
+            ],
+        )
+        caption = f"epoch {epoch} | teacher-forced replay | action MAE {trace.action_mae:.3f}"
+        gif_path = self._write_gif(trace.frames, f"demonstration-epoch-{epoch:03d}.gif")
         self._run.log(
             {
                 "trainer/global_step": step,

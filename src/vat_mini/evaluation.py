@@ -22,6 +22,47 @@ class RolloutTrace:
     total_return: float
 
 
+@dataclass(frozen=True)
+class DemonstrationTrace:
+    """One teacher-forced episode for continuous-action visual comparison.
+
+    Robomimic has no simulator wired in here, so instead of a closed-loop
+    rollout we replay a real demonstration: the recorded camera frames with the
+    policy's predicted action next to the ground-truth action at each step.
+    """
+
+    frames: np.ndarray
+    predicted_actions: np.ndarray
+    ground_truth_actions: np.ndarray
+
+    @property
+    def action_mae(self) -> float:
+        return float(np.abs(self.predicted_actions - self.ground_truth_actions).mean())
+
+
+@torch.no_grad()
+def record_demonstration(
+    model: VisionActionTransformer,
+    batches: Iterable[dict[str, torch.Tensor]],
+    device: torch.device,
+) -> DemonstrationTrace | None:
+    """Teacher-force the first validation episode and record predicted vs. true actions."""
+    batch = next(iter(batches), None)
+    if batch is None:
+        return None
+    model.eval()
+    observations = batch["observations"][:1].to(device)
+    actions = batch["actions"][:1].to(device)
+    valid = batch["valid_steps"][0].to(device)
+    predictions = model(observations, model.shifted_actions(actions))
+    keep = valid.cpu().numpy().astype(bool)
+    return DemonstrationTrace(
+        frames=observations[0].cpu().numpy()[keep],
+        predicted_actions=predictions[0].cpu().numpy()[keep],
+        ground_truth_actions=actions[0].cpu().numpy()[keep],
+    )
+
+
 @torch.no_grad()
 def evaluate_demonstrations(
     model: VisionActionTransformer,

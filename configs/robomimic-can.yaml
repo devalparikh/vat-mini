@@ -38,7 +38,7 @@ training:
   maximum_advantage_weight: 20.0
   initial_checkpoint: null
 tracking:
-  enabled: false
+  enabled: true
   project: vat-mini
   entity: null
   mode: online
