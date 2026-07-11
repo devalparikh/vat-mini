@@ -1,14 +1,14 @@
 # vat-mini
 
-![Closed-loop rollout of the vision-action policy on RoboMimic Can after `make robomimic-can` training](docs/images/robomimic-can-rollout.gif)
-
-*Closed-loop sim rollout on RoboMimic Can after a `make robomimic-can` training run.*
-
 Trained for 10 epochs at batch size 16 (10k train / 1k validation samples, sequence length 12, lr 3e-4). By the final epoch the 7-DoF action policy reaches a training loss of ~0.022 with a validation action MAE of ~0.062 (MSE ~0.022).
 
 A small vision-action transformer sandbox that can train and run end to end on a MacBook Pro.
 
 It uses a visual GridWorld and discrete actions to make data generation, causal modeling, training, post-training, checkpointing, and closed-loop evaluation concrete without requiring a robot dataset or a GPU server.
+
+![Closed-loop rollout of the vision-action policy on RoboMimic Can after `make robomimic-can` training](docs/images/robomimic-can-rollout.gif)
+
+*Closed-loop sim rollout on RoboMimic Can after a `make robomimic-can` training run.*
 
 ## Repo contents
 
@@ -223,6 +223,7 @@ flowchart LR
 ```text
 configs/                  local experiment definitions
 docs/architecture.md      model, stage, and system design
+docs/sim-rollout.md       closed-loop RoboMimic simulator rollouts
 learning-site/            React + TypeScript interactive guide
 src/vat_mini/
   cli.py                  command composition
@@ -232,13 +233,14 @@ src/vat_mini/
   objectives.py           behavior cloning + advantage weighting
   trainer.py              optimization and logging loop
   evaluation.py           held-out and closed-loop metrics
+  robomimic_rollout.py    closed-loop robosuite sim rollouts (optional sim extra)
   tracking.py             optional W&B metrics, media, and artifacts
   checkpoint.py           portable atomic checkpoints
   device.py               accelerator selection + seeding
 tests/                    fast unit and integration coverage
 ```
 
-See [docs/architecture.md](docs/architecture.md) for tensor flow, stage semantics, production patterns, and deliberately deferred features.
+See [docs/architecture.md](docs/architecture.md) for tensor flow, stage semantics, production patterns, and deliberately deferred features, and [docs/sim-rollout.md](docs/sim-rollout.md) for closed-loop RoboMimic simulator rollouts (real `rollout_success_rate` instead of a teacher-forced replay).
 
 ## How to read the code
 
