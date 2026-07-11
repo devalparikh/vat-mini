@@ -8,6 +8,40 @@ from torch import nn
 from vat_mini.config import ModelConfig
 
 
+class AdaptiveAvgPool2d(nn.Module):
+    """Adaptive average pooling that also works on MPS.
+
+    ``nn.AdaptiveAvgPool2d`` errors on MPS when the input is not divisible by
+    the output (e.g. an 84px frame becomes a 21x21 map, indivisible by 4). We
+    compute the same variable-sized pooling windows explicitly, which is cheap
+    for the tiny 4x4 output here and behaves identically across devices.
+    """
+
+    def __init__(self, output_size: tuple[int, int]):
+        super().__init__()
+        self.output_height, self.output_width = output_size
+
+    def forward(self, features: torch.Tensor) -> torch.Tensor:
+        _, _, height, width = features.shape
+        row_bounds = self._window_bounds(height, self.output_height)
+        column_bounds = self._window_bounds(width, self.output_width)
+        rows = [
+            torch.stack(
+                [features[:, :, top:bottom, left:right].mean(dim=(2, 3)) for left, right in column_bounds],
+                dim=-1,
+            )
+            for top, bottom in row_bounds
+        ]
+        return torch.stack(rows, dim=-2)
+
+    @staticmethod
+    def _window_bounds(input_size: int, output_size: int) -> list[tuple[int, int]]:
+        return [
+            (index * input_size // output_size, -(-(index + 1) * input_size // output_size))
+            for index in range(output_size)
+        ]
+
+
 class VisionEncoder(nn.Module):
     """Converts each RGB frame into one learned visual token."""
 
@@ -20,7 +54,7 @@ class VisionEncoder(nn.Module):
             nn.GELU(),
             # A 4x4 map preserves where agent and target appear; global pooling
             # would erase precisely the spatial relation the policy must learn.
-            nn.AdaptiveAvgPool2d((4, 4)),
+            AdaptiveAvgPool2d((4, 4)),
             nn.Flatten(),
         )
         self.projection = nn.Linear(vision_width * 2 * 4 * 4, embedding_dim)
