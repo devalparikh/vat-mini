@@ -17,3 +17,4 @@ data/generated/
 # Learning site
 learning-site/node_modules/
 learning-site/dist/
+.env
