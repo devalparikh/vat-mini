@@ -37,6 +37,8 @@ def inspect_environment(_: argparse.Namespace) -> None:
 
 def generate_data(args: argparse.Namespace) -> None:
     config = _load_experiment(args)
+    if config.data.dataset_type != "gridworld":
+        raise ValueError("generate-data only creates synthetic GridWorld datasets")
     destination = args.output or config.data.dataset_path or "data/gridworld.npz"
     path = save_dataset(destination, config.data, config.seed)
     print(f"saved dataset to {path}")
@@ -67,16 +69,17 @@ def evaluate(args: argparse.Namespace) -> dict[str, float]:
     payload = load_checkpoint(checkpoint, model)
     model.to(device)
     metrics = evaluate_demonstrations(model, validation_loader, device)
-    metrics.update(
-        evaluate_rollouts(
-            model,
-            device,
-            config.data.grid_size,
-            config.data.image_size,
-            episodes=args.episodes,
-            seed=config.seed + 2,
+    if config.data.dataset_type == "gridworld":
+        metrics.update(
+            evaluate_rollouts(
+                model,
+                device,
+                config.data.grid_size,
+                config.data.image_size,
+                episodes=args.episodes,
+                seed=config.seed + 2,
+            )
         )
-    )
     print(json.dumps({"checkpoint_stage": payload.get("stage"), **metrics}, indent=2))
     return metrics
 

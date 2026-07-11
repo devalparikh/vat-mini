@@ -11,6 +11,7 @@ import yaml
 
 @dataclass
 class DataConfig:
+    dataset_type: str = "gridworld"
     dataset_path: str | None = None
     train_samples: int = 256
     validation_samples: int = 64
@@ -20,11 +21,16 @@ class DataConfig:
     batch_size: int = 16
     num_workers: int = 0
     action_noise: float = 0.0
+    camera_key: str = "agentview_image"
+    validation_fraction: float = 0.1
+    frame_stride: int = 1
 
 
 @dataclass
 class ModelConfig:
+    action_type: str = "discrete"
     num_actions: int = 5
+    action_dimension: int = 7
     vision_width: int = 32
     embedding_dim: int = 96
     transformer_layers: int = 2
@@ -83,12 +89,29 @@ class ExperimentConfig:
             raise ValueError("data.sequence_length exceeds model.max_sequence_length")
         if self.training.stage not in {"pretrain", "posttrain"}:
             raise ValueError("training.stage must be 'pretrain' or 'posttrain'")
-        if self.model.num_actions != 5:
+        if self.data.dataset_type not in {"gridworld", "robomimic_hdf5"}:
+            raise ValueError("data.dataset_type must be 'gridworld' or 'robomimic_hdf5'")
+        if self.model.action_type not in {"discrete", "continuous"}:
+            raise ValueError("model.action_type must be 'discrete' or 'continuous'")
+        if self.data.dataset_type == "gridworld" and self.model.action_type != "discrete":
+            raise ValueError("the gridworld dataset requires model.action_type='discrete'")
+        if self.data.dataset_type == "gridworld" and self.model.num_actions != 5:
             raise ValueError("the grid-world dataset currently defines exactly 5 actions")
-        if self.data.grid_size < 2 or self.data.image_size < self.data.grid_size:
-            raise ValueError("image_size must be >= grid_size >= 2")
+        if self.data.dataset_type == "robomimic_hdf5":
+            if self.model.action_type != "continuous":
+                raise ValueError("RoboMimic requires model.action_type='continuous'")
+            if not self.data.dataset_path:
+                raise ValueError("RoboMimic requires data.dataset_path")
+        if self.model.action_dimension <= 0:
+            raise ValueError("model.action_dimension must be positive")
+        if self.data.grid_size < 2 or self.data.image_size < 1:
+            raise ValueError("grid_size must be >= 2 and image_size must be positive")
         if not 0.0 <= self.data.action_noise <= 1.0:
             raise ValueError("data.action_noise must be between 0 and 1")
+        if not 0.0 < self.data.validation_fraction < 1.0:
+            raise ValueError("data.validation_fraction must be between 0 and 1")
+        if self.data.frame_stride <= 0:
+            raise ValueError("data.frame_stride must be positive")
         if self.training.epochs <= 0:
             raise ValueError("training.epochs must be positive")
         if self.training.log_every_steps <= 0 or self.training.checkpoint_every_epochs <= 0:

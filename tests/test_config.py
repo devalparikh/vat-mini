@@ -56,3 +56,19 @@ def test_unknown_tracking_mode_fails_early() -> None:
     path = Path(__file__).parents[1] / "configs" / "smoke.yaml"
     with pytest.raises(ValueError, match="tracking.mode"):
         load_config(path, ["tracking.mode=maybe"])
+
+
+def test_robomimic_requires_continuous_actions_and_path() -> None:
+    path = Path(__file__).parents[1] / "configs" / "smoke.yaml"
+    with pytest.raises(ValueError, match="continuous"):
+        load_config(path, ["data.dataset_type=robomimic_hdf5", "data.dataset_path=can.hdf5"])
+    config = load_config(
+        path,
+        [
+            "data.dataset_type=robomimic_hdf5",
+            "data.dataset_path=can.hdf5",
+            "model.action_type=continuous",
+            "model.action_dimension=7",
+        ],
+    )
+    assert config.model.action_dimension == 7

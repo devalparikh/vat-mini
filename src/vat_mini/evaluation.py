@@ -34,19 +34,34 @@ def evaluate_demonstrations(
     token_count = 0
     batch_count = 0
     action_counts: torch.Tensor | None = None
+    absolute_error = 0.0
     for batch in batches:
         observations = batch["observations"].to(device)
         actions = batch["actions"].to(device)
         valid_steps = batch["valid_steps"].to(device)
-        logits = model(observations, model.shifted_actions(actions))
-        token_losses = F.cross_entropy(logits.flatten(0, 1), actions.flatten(), reduction="none")
+        predictions = model(observations, model.shifted_actions(actions))
         valid = valid_steps.flatten()
-        total_loss += float(token_losses[valid].mean().item())
-        correct += int(((logits.argmax(dim=-1) == actions) & valid_steps).sum().item())
+        if model.config.action_type == "continuous":
+            per_step_mse = F.mse_loss(predictions, actions, reduction="none").mean(dim=-1)
+            total_loss += float(per_step_mse[valid_steps].mean().item())
+            absolute_error += float(
+                predictions.sub(actions).abs().mean(dim=-1)[valid_steps].sum().item()
+            )
+        else:
+            token_losses = F.cross_entropy(
+                predictions.flatten(0, 1), actions.flatten(), reduction="none"
+            )
+            total_loss += float(token_losses[valid].mean().item())
+            correct += int(((predictions.argmax(dim=-1) == actions) & valid_steps).sum().item())
+            counts = torch.bincount(actions[valid_steps], minlength=model.config.num_actions).cpu()
+            action_counts = counts if action_counts is None else action_counts + counts
         token_count += int(valid_steps.sum().item())
-        counts = torch.bincount(actions[valid_steps], minlength=model.config.num_actions).cpu()
-        action_counts = counts if action_counts is None else action_counts + counts
         batch_count += 1
+    if model.config.action_type == "continuous":
+        return {
+            "validation_action_mse": total_loss / max(batch_count, 1),
+            "validation_action_mae": absolute_error / max(token_count, 1),
+        }
     return {
         "validation_loss": total_loss / max(batch_count, 1),
         "validation_token_accuracy": correct / max(token_count, 1),

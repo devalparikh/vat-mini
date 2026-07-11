@@ -16,6 +16,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = ["pytest>=8.0"]
 tracking = ["Pillow>=10", "wandb>=0.18"]
+robotics = ["h5py>=3.11"]
 
 [project.scripts]
 vat-mini = "vat_mini.cli:main"

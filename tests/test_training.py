@@ -75,3 +75,54 @@ def test_one_epoch_writes_portable_checkpoint(tmp_path: Path) -> None:
     assert tracker.rollout_epochs == [1]
     assert tracker.checkpoints == [checkpoint]
     assert tracker.exit_codes == [0]
+
+
+def test_continuous_robomimic_training_path(tmp_path: Path) -> None:
+    h5py = __import__("pytest").importorskip("h5py")
+    dataset_path = tmp_path / "can.hdf5"
+    with h5py.File(dataset_path, "w") as archive:
+        data = archive.create_group("data")
+        for episode_index in range(4):
+            episode = data.create_group(f"demo_{episode_index}")
+            observations = episode.create_group("obs")
+            observations.create_dataset(
+                "agentview_image",
+                data=torch.randint(0, 256, (6, 16, 16, 3), dtype=torch.uint8).numpy(),
+            )
+            episode.create_dataset(
+                "actions", data=torch.rand(6, 7).mul(2).sub(1).numpy()
+            )
+            episode.create_dataset("rewards", data=torch.zeros(6).numpy())
+    config = ExperimentConfig(
+        output_dir=str(tmp_path / "run"),
+        device="cpu",
+        data=DataConfig(
+            dataset_type="robomimic_hdf5",
+            dataset_path=str(dataset_path),
+            train_samples=4,
+            validation_samples=2,
+            sequence_length=3,
+            image_size=16,
+            batch_size=2,
+        ),
+        model=ModelConfig(
+            action_type="continuous",
+            action_dimension=7,
+            vision_width=4,
+            embedding_dim=16,
+            transformer_layers=1,
+            attention_heads=2,
+            feedforward_dim=32,
+            dropout=0.0,
+            max_sequence_length=4,
+        ),
+        training=TrainingConfig(epochs=1, log_every_steps=100),
+    )
+    config.validate()
+    train_loader, validation_loader = build_dataloaders(config.data, config.seed)
+    metrics = Trainer(
+        config, VisionActionTransformer(config.model), torch.device("cpu")
+    ).fit(train_loader, validation_loader)
+    assert metrics["validation_action_mse"] >= 0.0
+    assert metrics["validation_action_mae"] >= 0.0
+    assert "rollout_success_rate" not in metrics

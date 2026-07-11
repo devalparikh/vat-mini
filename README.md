@@ -19,6 +19,8 @@ It uses a visual GridWorld and discrete actions to make data generation, causal 
 
 This is a toy visual policy, not a foundation VLA or robotics stack. Its value is that every important boundary remains visible and modifiable.
 
+The original GridWorld path remains the smallest complete example. VAT Mini also supports image-based RoboMimic HDF5 demonstrations with seven-dimensional continuous controls, so the same causal policy can be trained on realistic simulator camera frames.
+
 ## Quick start
 
 Requirements: macOS or Linux, Python 3.11–3.12, and `make`. Python 3.12 is recommended. The learning site additionally needs Node.js 20+.
@@ -83,6 +85,40 @@ make pretrain
 make posttrain
 make evaluate
 ```
+
+## Train on RoboMimic Can images
+
+Install the lightweight HDF5 dependency:
+
+```bash
+make setup-robotics
+```
+
+Obtain the RoboMimic **Can / proficient-human / image** HDF5 dataset and place it at:
+
+```text
+data/robomimic/can/ph/image.hdf5
+```
+
+The file must use RoboMimic's normal layout: `data/demo_*/obs/agentview_image`, `actions`, and optionally `rewards`. The released image datasets work directly; if starting from a raw state-only dataset, use RoboMimic's observation-extraction tooling first. Then inspect a small run before committing to the full configuration:
+
+```bash
+.venv/bin/vat-mini train \
+  --config configs/robomimic-can.yaml \
+  --set data.train_samples=256 \
+  --set data.validation_samples=64 \
+  --set training.epochs=1
+
+make robomimic-can
+```
+
+This path uses only `agentview_image` initially. The loader keeps the HDF5 file on disk and lazily reads fixed-length windows, resizes frames to 84×84, normalizes pixels to `[0, 1]`, and predicts the next normalized action vector:
+
+```text
+camera frames + shifted previous 7D controls → causal transformer → next 7D control
+```
+
+The seven outputs are continuous controls, not seven categories. The output head uses `tanh`, behavior cloning uses masked mean-squared error, and validation reports action MSE and MAE. Dataset demonstrations—not adjacent windows—are separated into train and validation splits.
 
 The commands perform three explicit steps:
 

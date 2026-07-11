@@ -41,7 +41,14 @@ class VisionActionTransformer(nn.Module):
         self.config = config
         self.begin_action_id = config.num_actions
         self.vision_encoder = VisionEncoder(config.vision_width, config.embedding_dim)
-        self.previous_action_embedding = nn.Embedding(config.num_actions + 1, config.embedding_dim)
+        if config.action_type == "discrete":
+            self.previous_action_embedding: nn.Module = nn.Embedding(
+                config.num_actions + 1, config.embedding_dim
+            )
+            output_dimension = config.num_actions
+        else:
+            self.previous_action_embedding = nn.Linear(config.action_dimension, config.embedding_dim)
+            output_dimension = config.action_dimension
         self.position_embedding = nn.Embedding(config.max_sequence_length, config.embedding_dim)
         layer = nn.TransformerEncoderLayer(
             d_model=config.embedding_dim,
@@ -58,9 +65,20 @@ class VisionActionTransformer(nn.Module):
             norm=nn.LayerNorm(config.embedding_dim),
             enable_nested_tensor=False,
         )
-        self.action_head = nn.Linear(config.embedding_dim, config.num_actions)
+        action_projection = nn.Linear(config.embedding_dim, output_dimension)
+        self.action_head = (
+            action_projection
+            if config.action_type == "discrete"
+            else nn.Sequential(action_projection, nn.Tanh())
+        )
 
     def shifted_actions(self, actions: torch.Tensor) -> torch.Tensor:
+        if self.config.action_type == "continuous":
+            begin = torch.zeros(
+                actions.shape[0], 1, self.config.action_dimension,
+                dtype=actions.dtype, device=actions.device,
+            )
+            return torch.cat((begin, actions[:, :-1]), dim=1)
         begin = torch.full(
             (actions.shape[0], 1), self.begin_action_id, dtype=torch.long, device=actions.device
         )
@@ -70,8 +88,13 @@ class VisionActionTransformer(nn.Module):
         if observations.ndim != 5:
             raise ValueError("observations must have shape [batch, time, channels, height, width]")
         batch_size, sequence_length = observations.shape[:2]
-        if previous_actions.shape != (batch_size, sequence_length):
-            raise ValueError("previous_actions must have shape [batch, time]")
+        expected_action_shape = (
+            (batch_size, sequence_length)
+            if self.config.action_type == "discrete"
+            else (batch_size, sequence_length, self.config.action_dimension)
+        )
+        if previous_actions.shape != expected_action_shape:
+            raise ValueError(f"previous_actions must have shape {expected_action_shape}")
         if sequence_length > self.config.max_sequence_length:
             raise ValueError("input sequence exceeds max_sequence_length")
 
@@ -92,6 +115,8 @@ class VisionActionTransformer(nn.Module):
     @torch.no_grad()
     def choose_action(self, observation_history: torch.Tensor, action_history: torch.Tensor) -> int:
         """Greedily select the next action from an unbatched rollout history."""
+        if self.config.action_type != "discrete":
+            raise RuntimeError("choose_action is only available for discrete closed-loop environments")
         if observation_history.shape[0] > self.config.max_sequence_length:
             observation_history = observation_history[-self.config.max_sequence_length :]
             action_history = action_history[-(self.config.max_sequence_length - 1) :]

@@ -36,3 +36,23 @@ def test_causal_mask_blocks_future_observations() -> None:
     second = model(changed_future, model.shifted_actions(actions))
     torch.testing.assert_close(first[:, :2], second[:, :2])
 
+
+def test_continuous_model_predicts_bounded_action_vector() -> None:
+    model = VisionActionTransformer(
+        ModelConfig(
+            action_type="continuous",
+            action_dimension=7,
+            vision_width=4,
+            embedding_dim=16,
+            transformer_layers=1,
+            attention_heads=2,
+            feedforward_dim=32,
+            dropout=0.0,
+            max_sequence_length=8,
+        )
+    )
+    observations = torch.rand(2, 4, 3, 32, 32)
+    actions = torch.rand(2, 4, 7).mul(2).sub(1)
+    predictions = model(observations, model.shifted_actions(actions))
+    assert predictions.shape == (2, 4, 7)
+    assert predictions.abs().max() <= 1.0

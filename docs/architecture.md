@@ -1,6 +1,6 @@
 # Architecture
 
-VAT Mini is a deliberately small vision-action policy. It keeps the control flow and phase boundaries found in larger training systems while using a synthetic task that can run locally.
+VAT Mini is a deliberately small vision-action policy. It keeps the control flow and phase boundaries found in larger training systems while supporting both a synthetic task and an image-based offline robotics dataset that can train locally.
 
 ## The task
 
@@ -34,7 +34,35 @@ CNN frame encoder ──► visual tokens [B,T,D]
                               action logits [B,T,5]
 ```
 
-The current encoder emits one token per frame. Patch tokens, language conditioning, continuous action heads, and cross-attention are reasonable future extensions, but they are not silently implied by the current code.
+The encoder emits one token per frame. Patch tokens, language conditioning, and cross-attention remain future extensions.
+
+## Continuous RoboMimic path
+
+`configs/robomimic-can.yaml` selects a second implementation of the same contracts:
+
+- `RobomimicSequenceDataset` lazily reads camera/action windows from demonstrations in an HDF5 file;
+- the external `agentview_image` camera is used as the visual observation;
+- previous seven-dimensional actions pass through a linear projection instead of a token embedding;
+- a `tanh` regression head predicts seven normalized continuous controls;
+- continuous behavior cloning optimizes masked MSE and reports MSE plus MAE;
+- entire demonstrations are assigned to either train or validation, preventing overlapping windows from leaking across the split.
+
+```text
+RGB frames [B,T,3,H,W]        previous controls [B,T,7]
+             │                            │
+             ▼                            ▼
+       CNN frame encoder          linear projection
+             └──────────────┬─────────────┘
+                            + position embeddings
+                                      │
+                                      ▼
+                             causal Transformer
+                                      │
+                                      ▼
+                       tanh action predictions [B,T,7]
+```
+
+Offline validation measures held-out action prediction. Closed-loop robot success is intentionally not reported without a matching RoboSuite environment; reporting GridWorld rollout metrics for robot data would be misleading.
 
 ## Training stages
 
@@ -46,7 +74,7 @@ The current encoder emits one token per frame. Patch tokens, language conditioni
 
 `configs/posttrain.yaml` initializes from the pretraining checkpoint and weights action imitation losses using normalized reward-to-go. Its training split injects controlled action noise, creating higher- and lower-return decisions for the weighting objective to distinguish; validation remains a clean expert split. Higher-return decisions receive more weight, with temperature and maximum-weight controls to keep optimization stable.
 
-This is an educational, discrete-action version of advantage-weighted imitation. It is not RLHF, DPO, online reinforcement learning, or preference tuning.
+Both discrete cross-entropy and continuous MSE versions of advantage-weighted imitation are available. This is not RLHF, DPO, online reinforcement learning, or preference tuning.
 
 ## Module boundaries
 
@@ -115,7 +143,7 @@ Included now:
 Not included yet:
 
 - distributed training or a project-specific remote object store;
-- real robot data, video decoding, language instructions, or continuous controls;
+- direct MP4/LeRobot decoding, language instructions, multi-camera fusion, or robot-state conditioning;
 - automatic mixed precision, compilation, gradient accumulation, or sharding;
 - self-supervised visual pretraining, offline RL, preference optimization, or safety constraints.
 

@@ -13,6 +13,7 @@ artifacts/
 runs/
 checkpoints/
 data/generated/
+data/robomimic/
 
 # Learning site
 learning-site/node_modules/

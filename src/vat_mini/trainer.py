@@ -12,7 +12,12 @@ from vat_mini.checkpoint import CheckpointManager, load_checkpoint
 from vat_mini.config import ExperimentConfig
 from vat_mini.evaluation import evaluate_demonstrations, evaluate_rollouts, record_rollout
 from vat_mini.model import VisionActionTransformer
-from vat_mini.objectives import AdvantageWeightedImitationObjective, BehaviorCloningObjective
+from vat_mini.objectives import (
+    AdvantageWeightedImitationObjective,
+    BehaviorCloningObjective,
+    ContinuousAdvantageWeightedImitationObjective,
+    ContinuousBehaviorCloningObjective,
+)
 from vat_mini.tracking import ExperimentTracker, build_tracker
 
 
@@ -39,8 +44,17 @@ class Trainer:
 
     def _build_objective(self):
         if self.config.training.stage == "pretrain":
-            return BehaviorCloningObjective()
-        return AdvantageWeightedImitationObjective(
+            return (
+                BehaviorCloningObjective()
+                if self.config.model.action_type == "discrete"
+                else ContinuousBehaviorCloningObjective()
+            )
+        objective_type = (
+            AdvantageWeightedImitationObjective
+            if self.config.model.action_type == "discrete"
+            else ContinuousAdvantageWeightedImitationObjective
+        )
+        return objective_type(
             temperature=self.config.training.advantage_temperature,
             maximum_weight=self.config.training.maximum_advantage_weight,
         )
@@ -65,6 +79,9 @@ class Trainer:
                     {"epoch": epoch, **self._namespaced_epoch_metrics(metrics)}, self.global_step
                 )
                 if (
+                    self.config.data.dataset_type == "gridworld"
+                    and self.config.model.action_type == "discrete"
+                    and
                     self.tracker.enabled
                     and epoch % self.config.tracking.rollout_every_epochs == 0
                 ):
@@ -80,15 +97,17 @@ class Trainer:
                     self.checkpoints.save(
                         self.model, self.optimizer, self.config, epoch, self.global_step, metrics
                     )
-            rollout_metrics = evaluate_rollouts(
-                self.model,
-                self.device,
-                self.config.data.grid_size,
-                self.config.data.image_size,
-                episodes=min(self.config.data.validation_samples, 32),
-                seed=self.config.seed + 2,
-            )
-            metrics.update(rollout_metrics)
+            if self.config.data.dataset_type == "gridworld":
+                metrics.update(
+                    evaluate_rollouts(
+                        self.model,
+                        self.device,
+                        self.config.data.grid_size,
+                        self.config.data.image_size,
+                        episodes=min(self.config.data.validation_samples, 32),
+                        seed=self.config.seed + 2,
+                    )
+                )
             # Refresh the final checkpoint so its metrics include closed-loop behavior.
             self.checkpoints.save(
                 self.model,
@@ -123,8 +142,8 @@ class Trainer:
             actions = batch["actions"].to(self.device)
             rewards = batch["rewards"].to(self.device)
             valid_steps = batch["valid_steps"].to(self.device)
-            logits = self.model(observations, self.model.shifted_actions(actions))
-            result = self.objective(logits, actions, rewards, valid_steps)
+            predictions = self.model(observations, self.model.shifted_actions(actions))
+            result = self.objective(predictions, actions, rewards, valid_steps)
 
             self.optimizer.zero_grad(set_to_none=True)
             result.loss.backward()
@@ -136,11 +155,16 @@ class Trainer:
             running_loss += float(result.loss.item())
             running_accuracy += result.token_accuracy
             running_weight += result.mean_weight
+            metric_name = (
+                "train/batch_token_accuracy"
+                if self.config.model.action_type == "discrete"
+                else "train/batch_action_mae"
+            )
             self.tracker.log_metrics(
                 {
                     "epoch": epoch,
                     "train/batch_loss": float(result.loss.item()),
-                    "train/batch_token_accuracy": result.token_accuracy,
+                    metric_name: result.token_accuracy,
                     "train/batch_mean_advantage_weight": result.mean_weight,
                 },
                 self.global_step,
@@ -152,13 +176,18 @@ class Trainer:
                             "epoch": epoch,
                             "step": self.global_step,
                             "loss": float(result.loss.item()),
-                            "token_accuracy": result.token_accuracy,
+                            ("token_accuracy" if self.config.model.action_type == "discrete" else "action_mae"): result.token_accuracy,
                         }
                     )
                 )
+        prediction_metric_name = (
+            "train_token_accuracy"
+            if self.config.model.action_type == "discrete"
+            else "train_action_mae"
+        )
         return {
             "train_loss": running_loss / max(batch_count, 1),
-            "train_token_accuracy": running_accuracy / max(batch_count, 1),
+            prediction_metric_name: running_accuracy / max(batch_count, 1),
             "train_mean_advantage_weight": running_weight / max(batch_count, 1),
         }
 

@@ -3,7 +3,7 @@ VENV := .venv
 PIP := $(VENV)/bin/pip
 VAT := $(VENV)/bin/vat-mini
 
-.PHONY: setup setup-tracking inspect test smoke data postdata pretrain posttrain evaluate learn learn-build clean-runs
+.PHONY: setup setup-tracking setup-robotics inspect test smoke data postdata pretrain posttrain robomimic-can evaluate learn learn-build clean-runs
 
 setup:
 	$(PYTHON) -m venv $(VENV)
@@ -11,6 +11,9 @@ setup:
 
 setup-tracking: setup
 	$(PIP) install -e '.[dev,tracking]'
+
+setup-robotics: setup
+	$(PIP) install -e '.[dev,robotics]'
 
 inspect:
 	$(VAT) inspect
@@ -32,6 +35,9 @@ pretrain: data
 
 posttrain: postdata
 	$(VAT) train --config configs/posttrain.yaml
+
+robomimic-can:
+	$(VAT) train --config configs/robomimic-can.yaml
 
 evaluate:
 	$(VAT) evaluate --config configs/posttrain.yaml

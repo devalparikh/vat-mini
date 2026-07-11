@@ -1,0 +1,46 @@
+seed: 17
+output_dir: runs/robomimic-can
+device: auto
+data:
+  dataset_type: robomimic_hdf5
+  dataset_path: data/robomimic/can/ph/image.hdf5
+  train_samples: 10000
+  validation_samples: 1000
+  sequence_length: 12
+  image_size: 84
+  grid_size: 8
+  batch_size: 16
+  num_workers: 0
+  action_noise: 0.0
+  camera_key: agentview_image
+  validation_fraction: 0.1
+  frame_stride: 1
+model:
+  action_type: continuous
+  num_actions: 5
+  action_dimension: 7
+  vision_width: 32
+  embedding_dim: 128
+  transformer_layers: 3
+  attention_heads: 4
+  feedforward_dim: 256
+  dropout: 0.1
+  max_sequence_length: 32
+training:
+  stage: pretrain
+  epochs: 10
+  learning_rate: 0.0003
+  weight_decay: 0.01
+  gradient_clip_norm: 1.0
+  log_every_steps: 50
+  checkpoint_every_epochs: 1
+  advantage_temperature: 0.5
+  maximum_advantage_weight: 20.0
+  initial_checkpoint: null
+tracking:
+  enabled: false
+  project: vat-mini
+  entity: null
+  mode: online
+  run_name: robomimic-can
+  rollout_every_epochs: 1

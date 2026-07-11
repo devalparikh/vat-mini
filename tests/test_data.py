@@ -39,3 +39,36 @@ def test_action_noise_only_changes_training_split() -> None:
     )
     assert not torch.equal(clean_train.actions, noisy_train.actions)
     assert torch.equal(clean_validation.actions, noisy_validation.actions)
+
+
+def test_robomimic_hdf5_is_loaded_as_lazy_sequence_windows(tmp_path) -> None:
+    h5py = __import__("pytest").importorskip("h5py")
+    path = tmp_path / "can.hdf5"
+    with h5py.File(path, "w") as archive:
+        data = archive.create_group("data")
+        for episode_index in range(4):
+            episode = data.create_group(f"demo_{episode_index}")
+            observations = episode.create_group("obs")
+            observations.create_dataset(
+                "agentview_image",
+                data=np.full((8, 20, 20, 3), episode_index * 10, dtype=np.uint8),
+            )
+            episode.create_dataset("actions", data=np.zeros((8, 7), dtype=np.float32))
+            episode.create_dataset("rewards", data=np.arange(8, dtype=np.float32))
+    train, validation = build_datasets(
+        DataConfig(
+            dataset_type="robomimic_hdf5",
+            dataset_path=str(path),
+            train_samples=5,
+            validation_samples=2,
+            sequence_length=3,
+            image_size=16,
+        ),
+        seed=3,
+    )
+    assert len(train) == 5
+    assert len(validation) == 2
+    sample = train[0]
+    assert sample["observations"].shape == (3, 3, 16, 16)
+    assert sample["actions"].shape == (3, 7)
+    assert sample["valid_steps"].all()

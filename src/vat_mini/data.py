@@ -7,6 +7,7 @@ from pathlib import Path
 import numpy as np
 import torch
 from torch.utils.data import DataLoader, Dataset
+from torch.nn import functional as F
 
 from vat_mini.config import DataConfig
 
@@ -136,6 +137,124 @@ class GridWorldSequenceDataset(Dataset[dict[str, torch.Tensor]]):
         }
 
 
+class RobomimicSequenceDataset(Dataset[dict[str, torch.Tensor]]):
+    """Lazy fixed-length windows over RoboMimic HDF5 demonstrations.
+
+    HDF5 files remain on disk and only the requested camera frames are decoded
+    for each batch. This is important for image training on memory-constrained
+    local machines.
+    """
+
+    def __init__(
+        self,
+        path: str | Path,
+        demonstration_keys: list[str],
+        sequence_length: int,
+        image_size: int,
+        camera_key: str,
+        frame_stride: int,
+        maximum_samples: int,
+        seed: int,
+    ):
+        self.path = str(path)
+        self.sequence_length = sequence_length
+        self.image_size = image_size
+        self.camera_key = camera_key
+        self.frame_stride = frame_stride
+        self._archive = None
+        h5py = _require_h5py()
+        candidates: list[tuple[str, int]] = []
+        with h5py.File(self.path, "r") as archive:
+            for demonstration_key in demonstration_keys:
+                episode = archive[f"data/{demonstration_key}"]
+                length = int(episode["actions"].shape[0])
+                required_span = (sequence_length - 1) * frame_stride + 1
+                for start in range(max(length - required_span + 1, 0)):
+                    candidates.append((demonstration_key, start))
+        rng = np.random.default_rng(seed)
+        if len(candidates) > maximum_samples:
+            selected = rng.choice(len(candidates), size=maximum_samples, replace=False)
+            self.windows = [candidates[int(index)] for index in selected]
+        else:
+            self.windows = candidates
+
+    def __len__(self) -> int:
+        return len(self.windows)
+
+    def _file(self):
+        if self._archive is None:
+            self._archive = _require_h5py().File(self.path, "r")
+        return self._archive
+
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        state["_archive"] = None
+        return state
+
+    def __del__(self):
+        archive = getattr(self, "_archive", None)
+        if archive is not None:
+            archive.close()
+
+    def __getitem__(self, index: int) -> dict[str, torch.Tensor]:
+        demonstration_key, start = self.windows[index]
+        episode = self._file()[f"data/{demonstration_key}"]
+        indices = start + np.arange(self.sequence_length) * self.frame_stride
+        frames = np.asarray(episode[f"obs/{self.camera_key}"][indices])
+        if frames.ndim != 4:
+            raise ValueError(f"camera observations must have rank 4, received {frames.shape}")
+        if frames.shape[-1] == 3:
+            frames = np.moveaxis(frames, -1, 1)
+        observations = torch.from_numpy(frames.copy()).float().div_(255.0)
+        if observations.shape[-2:] != (self.image_size, self.image_size):
+            observations = F.interpolate(
+                observations, size=(self.image_size, self.image_size), mode="bilinear",
+                align_corners=False,
+            )
+        actions = torch.from_numpy(np.asarray(episode["actions"][indices]).copy()).float()
+        if "rewards" in episode:
+            rewards = torch.from_numpy(np.asarray(episode["rewards"][indices]).copy()).float()
+        else:
+            rewards = torch.zeros(self.sequence_length, dtype=torch.float32)
+        return {
+            "observations": observations,
+            "actions": actions,
+            "rewards": rewards,
+            "valid_steps": torch.ones(self.sequence_length, dtype=torch.bool),
+        }
+
+
+def _require_h5py():
+    try:
+        import h5py
+    except ImportError as error:
+        raise RuntimeError(
+            "RoboMimic HDF5 loading requires the robotics extra: pip install -e '.[robotics]'"
+        ) from error
+    return h5py
+
+
+def _robomimic_demonstration_split(config: DataConfig, seed: int) -> tuple[list[str], list[str]]:
+    if not config.dataset_path or not Path(config.dataset_path).exists():
+        raise FileNotFoundError(f"RoboMimic dataset does not exist: {config.dataset_path}")
+    h5py = _require_h5py()
+    with h5py.File(config.dataset_path, "r") as archive:
+        if "data" not in archive:
+            raise ValueError("RoboMimic HDF5 file must contain a 'data' group")
+        keys = sorted(archive["data"].keys())
+        if not keys:
+            raise ValueError("RoboMimic HDF5 file contains no demonstrations")
+        first = archive[f"data/{keys[0]}"]
+        if f"obs/{config.camera_key}" not in first:
+            raise ValueError(f"camera key not found in dataset: {config.camera_key}")
+    rng = np.random.default_rng(seed)
+    rng.shuffle(keys)
+    validation_count = max(1, round(len(keys) * config.validation_fraction))
+    if validation_count >= len(keys):
+        raise ValueError("RoboMimic dataset needs at least two demonstrations for a split")
+    return keys[validation_count:], keys[:validation_count]
+
+
 def generate_demonstrations(
     sample_count: int,
     sequence_length: int,
@@ -212,7 +331,26 @@ def _load_split(path: str | Path, split: str) -> dict[str, np.ndarray]:
         }
 
 
-def build_datasets(config: DataConfig, seed: int) -> tuple[GridWorldSequenceDataset, GridWorldSequenceDataset]:
+def build_datasets(config: DataConfig, seed: int) -> tuple[Dataset, Dataset]:
+    if config.dataset_type == "robomimic_hdf5":
+        train_keys, validation_keys = _robomimic_demonstration_split(config, seed)
+        common = dict(
+            path=config.dataset_path,
+            sequence_length=config.sequence_length,
+            image_size=config.image_size,
+            camera_key=config.camera_key,
+            frame_stride=config.frame_stride,
+        )
+        return (
+            RobomimicSequenceDataset(
+                demonstration_keys=train_keys, maximum_samples=config.train_samples,
+                seed=seed, **common,
+            ),
+            RobomimicSequenceDataset(
+                demonstration_keys=validation_keys, maximum_samples=config.validation_samples,
+                seed=seed + 1, **common,
+            ),
+        )
     path = Path(config.dataset_path) if config.dataset_path else None
     if path and path.exists():
         train_arrays = _load_split(path, "train")
