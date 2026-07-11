@@ -1,5 +1,11 @@
 # vat-mini
 
+![Closed-loop rollout of the vision-action policy on RoboMimic Can after `make robomimic-can` training](docs/images/robomimic-can-rollout.gif)
+
+*Closed-loop sim rollout on RoboMimic Can after a `make robomimic-can` training run.*
+
+Trained for 10 epochs at batch size 16 (10k train / 1k validation samples, sequence length 12, lr 3e-4). By the final epoch the 7-DoF action policy reaches a training loss of ~0.022 with a validation action MAE of ~0.062 (MSE ~0.022).
+
 A small vision-action transformer sandbox that can train and run end to end on a MacBook Pro.
 
 It uses a visual GridWorld and discrete actions to make data generation, causal modeling, training, post-training, checkpointing, and closed-loop evaluation concrete without requiring a robot dataset or a GPU server.
