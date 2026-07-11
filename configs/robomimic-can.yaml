@@ -44,3 +44,10 @@ tracking:
   mode: online
   run_name: robomimic-can
   rollout_every_epochs: 1
+  # Drive the policy in a real robosuite sim (needs `make setup-sim`). The
+  # rollout/video then shows the policy actually attempting the task, and a
+  # rollout_success_rate is reported. Falls back to a teacher-forced replay if
+  # the simulator is unavailable on this machine.
+  sim_rollout: true
+  sim_rollout_episodes: 5
+  sim_rollout_max_steps: 200

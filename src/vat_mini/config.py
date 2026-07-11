@@ -62,6 +62,12 @@ class TrackingConfig:
     mode: str = "online"
     run_name: str | None = None
     rollout_every_epochs: int = 1
+    # When enabled (RoboMimic only), the periodic rollout drives the policy in a
+    # real simulator instead of replaying a demonstration. Falls back to the
+    # teacher-forced replay if the sim stack is unavailable on this machine.
+    sim_rollout: bool = False
+    sim_rollout_episodes: int = 5
+    sim_rollout_max_steps: int = 400
 
 
 @dataclass
@@ -128,6 +134,12 @@ class ExperimentConfig:
             raise ValueError("tracking.mode must be 'online' or 'offline'")
         if self.tracking.rollout_every_epochs <= 0:
             raise ValueError("tracking.rollout_every_epochs must be positive")
+        if self.tracking.sim_rollout_episodes <= 0:
+            raise ValueError("tracking.sim_rollout_episodes must be positive")
+        if self.tracking.sim_rollout_max_steps <= 0:
+            raise ValueError("tracking.sim_rollout_max_steps must be positive")
+        if self.tracking.sim_rollout and self.data.dataset_type != "robomimic_hdf5":
+            raise ValueError("tracking.sim_rollout is only supported for the robomimic_hdf5 dataset")
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

@@ -162,3 +162,28 @@ class VisionActionTransformer(nn.Module):
         ).unsqueeze(0)
         logits = self(observation_history.unsqueeze(0), previous_actions)
         return int(logits[0, -1].argmax().item())
+
+    @torch.no_grad()
+    def choose_action_continuous(
+        self, observation_history: torch.Tensor, action_history: torch.Tensor
+    ) -> torch.Tensor:
+        """Predict the next continuous action vector from an unbatched rollout history.
+
+        ``observation_history`` has shape ``[T, C, H, W]`` and ``action_history``
+        holds the ``[T - 1, action_dimension]`` actions already taken this episode.
+        The begin-of-sequence action is a zero vector, matching ``shifted_actions``.
+        """
+        if self.config.action_type != "continuous":
+            raise RuntimeError(
+                "choose_action_continuous is only available for continuous-action policies"
+            )
+        if observation_history.shape[0] > self.config.max_sequence_length:
+            observation_history = observation_history[-self.config.max_sequence_length :]
+            action_history = action_history[-(self.config.max_sequence_length - 1) :]
+        begin = torch.zeros(
+            1, self.config.action_dimension,
+            dtype=observation_history.dtype, device=observation_history.device,
+        )
+        previous_actions = torch.cat((begin, action_history)).unsqueeze(0)
+        predictions = self(observation_history.unsqueeze(0), previous_actions)
+        return predictions[0, -1]

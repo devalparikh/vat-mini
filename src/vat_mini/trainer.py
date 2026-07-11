@@ -46,6 +46,9 @@ class Trainer:
         self.checkpoints = CheckpointManager(config.output_dir)
         self.global_step = 0
         self.tracker = tracker or build_tracker(config)
+        # Disabled after the first failure so an unavailable simulator (e.g. no
+        # MuJoCo offscreen rendering) does not retry and spam warnings each epoch.
+        self._sim_rollout_enabled = config.tracking.sim_rollout
 
     def _build_objective(self):
         if self.config.training.stage == "pretrain":
@@ -99,7 +102,7 @@ class Trainer:
                             seed=self.config.seed + 2,
                         )
                         self.tracker.log_rollout(trace, epoch, self.global_step)
-                    else:
+                    elif not self._log_sim_rollout(epoch):
                         demonstration = record_demonstration(
                             self.model, validation_loader, self.device
                         )
@@ -122,6 +125,8 @@ class Trainer:
                         seed=self.config.seed + 2,
                     )
                 )
+            elif self.config.tracking.sim_rollout and self._sim_rollout_enabled:
+                metrics.update(self._evaluate_sim_rollouts())
             # Refresh the final checkpoint so its metrics include closed-loop behavior.
             self.checkpoints.save(
                 self.model,
@@ -144,6 +149,44 @@ class Trainer:
             return metrics
         finally:
             self.tracker.finish(exit_code=exit_code)
+
+    def _log_sim_rollout(self, epoch: int) -> bool:
+        """Record one closed-loop sim episode; return False to fall back to a replay.
+
+        Imported lazily so the simulator dependency is only touched when actually
+        requested, and any unavailability disables further attempts this run.
+        """
+        if not self._sim_rollout_enabled:
+            return False
+        from vat_mini.robomimic_rollout import SimRolloutUnavailable, record_sim_rollout
+
+        try:
+            trace = record_sim_rollout(
+                self.model, self.config, self.device, seed=self.config.seed + 2
+            )
+        except SimRolloutUnavailable as error:
+            self._sim_rollout_enabled = False
+            print(f"sim rollout unavailable, falling back to demonstration replay: {error}")
+            return False
+        self.tracker.log_sim_rollout(trace, epoch, self.global_step)
+        return True
+
+    def _evaluate_sim_rollouts(self) -> dict[str, float]:
+        """Aggregate closed-loop success/return over several sim episodes."""
+        from vat_mini.robomimic_rollout import SimRolloutUnavailable, evaluate_sim_rollouts
+
+        try:
+            return evaluate_sim_rollouts(
+                self.model,
+                self.config,
+                self.device,
+                episodes=self.config.tracking.sim_rollout_episodes,
+                seed=self.config.seed + 3,
+            )
+        except SimRolloutUnavailable as error:
+            self._sim_rollout_enabled = False
+            print(f"sim rollout evaluation unavailable: {error}")
+            return {}
 
     def _train_epoch(self, train_loader: Iterable, epoch: int) -> dict[str, float]:
         self.model.train()

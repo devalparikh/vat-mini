@@ -3,7 +3,7 @@ VENV := .venv
 PIP := $(VENV)/bin/pip
 VAT := $(VENV)/bin/vat-mini
 
-.PHONY: setup setup-tracking setup-robotics inspect test smoke data postdata pretrain posttrain robomimic-can evaluate learn learn-build clean-runs
+.PHONY: setup setup-tracking setup-robotics setup-sim inspect test smoke data postdata pretrain posttrain robomimic-can evaluate learn learn-build clean-runs
 
 setup:
 	$(PYTHON) -m venv $(VENV)
@@ -14,6 +14,9 @@ setup-tracking: setup
 
 setup-robotics: setup
 	$(PIP) install -e '.[dev,robotics]'
+
+setup-sim: setup
+	$(PIP) install -e '.[dev,tracking,sim]'
 
 inspect:
 	$(VAT) inspect

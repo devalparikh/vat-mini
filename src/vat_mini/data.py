@@ -15,6 +15,28 @@ STAY, UP, DOWN, LEFT, RIGHT = range(5)
 ACTION_NAMES = ("stay", "up", "down", "left", "right")
 
 
+def frames_to_observation(frames: np.ndarray, image_size: int) -> torch.Tensor:
+    """Convert raw camera frames to the model's observation tensor.
+
+    Accepts a stack of ``[T, H, W, 3]`` (channel-last) or ``[T, 3, H, W]`` frames
+    in the ``[0, 255]`` range and returns ``[T, 3, image_size, image_size]`` floats
+    in ``[0, 1]``. Used by both the dataset loader and the closed-loop sim rollout
+    so the policy sees pixels preprocessed identically in training and evaluation.
+    """
+    frames = np.asarray(frames)
+    if frames.ndim != 4:
+        raise ValueError(f"camera observations must have rank 4, received {frames.shape}")
+    if frames.shape[-1] == 3:
+        frames = np.moveaxis(frames, -1, 1)
+    observations = torch.from_numpy(np.ascontiguousarray(frames)).float().div_(255.0)
+    if observations.shape[-2:] != (image_size, image_size):
+        observations = F.interpolate(
+            observations, size=(image_size, image_size), mode="bilinear",
+            align_corners=False,
+        )
+    return observations
+
+
 @dataclass
 class GridState:
     agent_row: int
@@ -201,16 +223,7 @@ class RobomimicSequenceDataset(Dataset[dict[str, torch.Tensor]]):
         episode = self._file()[f"data/{demonstration_key}"]
         indices = start + np.arange(self.sequence_length) * self.frame_stride
         frames = np.asarray(episode[f"obs/{self.camera_key}"][indices])
-        if frames.ndim != 4:
-            raise ValueError(f"camera observations must have rank 4, received {frames.shape}")
-        if frames.shape[-1] == 3:
-            frames = np.moveaxis(frames, -1, 1)
-        observations = torch.from_numpy(frames.copy()).float().div_(255.0)
-        if observations.shape[-2:] != (self.image_size, self.image_size):
-            observations = F.interpolate(
-                observations, size=(self.image_size, self.image_size), mode="bilinear",
-                align_corners=False,
-            )
+        observations = frames_to_observation(frames, self.image_size)
         actions = torch.from_numpy(np.asarray(episode["actions"][indices]).copy()).float()
         if "rewards" in episode:
             rewards = torch.from_numpy(np.asarray(episode["rewards"][indices]).copy()).float()

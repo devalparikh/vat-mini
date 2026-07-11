@@ -1,10 +1,10 @@
 # vat-mini
 
-A small, production-shaped vision-action transformer sandbox that can train and run end to end on a MacBook Pro.
+A small vision-action transformer sandbox that can train and run end to end on a MacBook Pro.
 
 It uses a visual GridWorld and discrete actions to make data generation, causal modeling, training, post-training, checkpointing, and closed-loop evaluation concrete without requiring a robot dataset or a GPU server.
 
-## What is included
+## Repo contents
 
 - a compact convolutional vision encoder + causal action transformer in PyTorch;
 - deterministic synthetic expert trajectories with separate train/validation seeds;
@@ -17,9 +17,9 @@ It uses a visual GridWorld and discrete actions to make data generation, causal 
 - unit/integration tests and a small smoke run;
 - a React learning workbench with interactive tensor, attention, and training visuals.
 
-This is a toy visual policy, not a foundation VLA or robotics stack. Its value is that every important boundary remains visible and modifiable.
-
-The original GridWorld path remains the smallest complete example. VAT Mini also supports image-based RoboMimic HDF5 demonstrations with seven-dimensional continuous controls, so the same causal policy can be trained on realistic simulator camera frames.
+Examples supported:
+- GridWorld path (5 dimensional controls)
+- image-based RoboMimic HDF5 (7 dimensional controls). the same causal policy can be trained on realistic simulator camera frames.
 
 ## Quick start
 
@@ -95,6 +95,8 @@ make setup-robotics
 ```
 
 Obtain the RoboMimic **Can / proficient-human / image** HDF5 dataset and place it at:
+
+download link: https://downloads.cs.stanford.edu/downloads/rt_benchmark/can/ph/image.hdf5
 
 ```text
 data/robomimic/can/ph/image.hdf5

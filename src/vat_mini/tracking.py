@@ -9,7 +9,7 @@ import numpy as np
 
 from vat_mini.config import ExperimentConfig
 from vat_mini.data import ACTION_NAMES
-from vat_mini.evaluation import DemonstrationTrace, RolloutTrace
+from vat_mini.evaluation import DemonstrationTrace, RolloutTrace, SimRolloutTrace
 
 
 class ExperimentTracker(Protocol):
@@ -21,6 +21,8 @@ class ExperimentTracker(Protocol):
     def log_rollout(self, trace: RolloutTrace, epoch: int, step: int) -> None: ...
 
     def log_demonstration(self, trace: DemonstrationTrace, epoch: int, step: int) -> None: ...
+
+    def log_sim_rollout(self, trace: SimRolloutTrace, epoch: int, step: int) -> None: ...
 
     def log_checkpoint(self, path: str | Path, stage: str) -> None: ...
 
@@ -39,6 +41,9 @@ class DisabledTracker:
         del trace, epoch, step
 
     def log_demonstration(self, trace: DemonstrationTrace, epoch: int, step: int) -> None:
+        del trace, epoch, step
+
+    def log_sim_rollout(self, trace: SimRolloutTrace, epoch: int, step: int) -> None:
         del trace, epoch, step
 
     def log_checkpoint(self, path: str | Path, stage: str) -> None:
@@ -82,7 +87,7 @@ class WandbTracker:
     def log_metrics(self, metrics: dict[str, float | int], step: int) -> None:
         self._run.log({"trainer/global_step": step, **metrics})
 
-    def _write_gif(self, frames: np.ndarray, name: str) -> Path:
+    def _write_gif(self, frames: np.ndarray, name: str, duration: int = 500) -> Path:
         """Write channel-first float frames in [0, 1] to an upscaled looping gif."""
         pixels = np.clip(frames * 255.0, 0, 255).astype(np.uint8).transpose(0, 2, 3, 1)
         # Make the small frame legible without changing its pixels.
@@ -94,7 +99,7 @@ class WandbTracker:
             gif_path,
             save_all=True,
             append_images=images[1:],
-            duration=500,
+            duration=duration,
             loop=0,
             optimize=False,
         )
@@ -140,6 +145,35 @@ class WandbTracker:
             {
                 "trainer/global_step": step,
                 "rollout/video": self._wandb.Video(str(gif_path), format="gif", caption=caption),
+                "rollout/actions": table,
+            }
+        )
+
+    def log_sim_rollout(self, trace: SimRolloutTrace, epoch: int, step: int) -> None:
+        caption = (
+            f"epoch {epoch} | closed-loop sim | "
+            f"{'success' if trace.success else 'timeout'} | "
+            f"return {trace.total_return:.3f} | {trace.steps} steps"
+        )
+        table = self._wandb.Table(
+            columns=["epoch", "step", "dimension", "action", "reward"],
+            data=[
+                [epoch, index + 1, dimension, float(action[dimension]), float(reward)]
+                for index, (action, reward) in enumerate(zip(trace.actions, trace.rewards))
+                for dimension in range(trace.actions.shape[-1])
+            ],
+        )
+        # Sim episodes are long (100s of steps); play them back near real time.
+        gif_path = self._write_gif(
+            trace.frames, f"sim-rollout-epoch-{epoch:03d}.gif", duration=80
+        )
+        self._run.log(
+            {
+                "trainer/global_step": step,
+                "rollout/video": self._wandb.Video(str(gif_path), format="gif", caption=caption),
+                "rollout/success": int(trace.success),
+                "rollout/return": trace.total_return,
+                "rollout/steps": trace.steps,
                 "rollout/actions": table,
             }
         )

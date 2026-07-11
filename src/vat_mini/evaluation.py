@@ -23,6 +23,27 @@ class RolloutTrace:
 
 
 @dataclass(frozen=True)
+class SimRolloutTrace:
+    """One closed-loop episode of a continuous-action policy driving a simulator.
+
+    Unlike ``DemonstrationTrace`` (a teacher-forced replay of recorded data), these
+    frames are what the policy actually produced: at each step the model chose the
+    action and the simulator advanced, so the video shows the policy succeeding or
+    failing on its own.
+    """
+
+    frames: np.ndarray  # [T + 1, 3, H, W] float in [0, 1] — what the policy saw
+    actions: np.ndarray  # [T, action_dimension]
+    rewards: np.ndarray  # [T]
+    success: bool
+    total_return: float
+
+    @property
+    def steps(self) -> int:
+        return int(self.actions.shape[0])
+
+
+@dataclass(frozen=True)
 class DemonstrationTrace:
     """One teacher-forced episode for continuous-action visual comparison.
 
