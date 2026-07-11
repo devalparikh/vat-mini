@@ -2,7 +2,7 @@
 
 A small, production-shaped vision-action transformer sandbox that can train and run end to end on a MacBook Pro.
 
-VAT Mini is meant to be read as much as it is meant to be run. It uses a visual GridWorld and discrete actions to make data generation, causal modeling, training, post-training, checkpointing, and closed-loop evaluation concrete without requiring a robot dataset or a GPU server.
+It uses a visual GridWorld and discrete actions to make data generation, causal modeling, training, post-training, checkpointing, and closed-loop evaluation concrete without requiring a robot dataset or a GPU server.
 
 ## What is included
 
@@ -122,6 +122,57 @@ To verify a production build without starting the dev server:
 ```bash
 make learn-build
 ```
+
+## Architecture, training, and inference
+
+The model turns each RGB observation into a visual embedding, combines it with the previous action and timestep position, mixes the available history with a causal transformer, and produces five action logits. Softmax converts those logits into probabilities; inference selects the highest-probability action and feeds it back into the next step.
+
+![VAT Mini forward pass from RGB observations through the CNN, timestep token, causal context, action logits, and softmax probabilities](docs/images/architecture-training-inference.png)
+
+During behavior-cloning pretraining, the expert action is the target. Cross-entropy measures the prediction error, backpropagation sends that error through the action head, transformer, and vision encoder, and the optimizer updates all three. Post-training starts from the pretrained checkpoint and gives more weight to actions associated with better returns.
+
+```mermaid
+flowchart LR
+    D[Expert trajectories] --> O[RGB observations]
+    O --> E[Vision encoder]
+    E --> T[Timestep tokens]
+    T --> C[Causal transformer]
+    C --> H[Action head]
+    H --> P[Action probabilities]
+    P --> A[Selected action]
+    A --> W[GridWorld]
+    W --> O
+    H --> L[Action loss]
+    D --> L
+    L -. backpropagation .-> E
+```
+
+## Quick reference
+
+| Concept | VAT Mini contract |
+| --- | --- |
+| Observation | RGB GridWorld image, `[B, T, 3, 32, 32]` |
+| Vision encoder | Compresses each image into a learned vector, `[B, T, D]` |
+| Timestep token | `visual embedding + previous-action embedding + position embedding` |
+| Causal context | Prediction at `t` can read observations through `t` and actions before `t`, never the future |
+| Action head | Produces five logits: `stay`, `up`, `down`, `left`, `right` |
+| Pretraining | Behavior cloning with cross-entropy against shortest-path expert actions |
+| Post-training | Reward-to-go advantage-weighted imitation initialized from the pretraining checkpoint |
+| Validation | Teacher-forced loss and token accuracy on unseen expert trajectories |
+| Inference | Autoregressive closed-loop rollout using the model's own previous actions |
+| Best behavioral metric | Closed-loop rollout success; replay accuracy alone can hide compounding errors |
+
+| Goal | Command |
+| --- | --- |
+| Set up the environment | `make setup` |
+| Inspect PyTorch and device selection | `make inspect` |
+| Run tests | `make test` |
+| Validate the full pipeline quickly | `make smoke` |
+| Train the behavior-cloned policy | `make pretrain` |
+| Run advantage-weighted post-training | `make posttrain` |
+| Evaluate the saved policy | `make evaluate` |
+| Open the interactive guide | `make learn` |
+| Verify the learning-site build | `make learn-build` |
 
 ## Repository map
 
